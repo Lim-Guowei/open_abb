@@ -5,10 +5,11 @@ MODULE SERVER
 !////////////////
 
 !//Robot configuration
-PERS tooldata currentTool := [TRUE,[[0,0,0],[1,0,0,0]],[0.001,[0,0,0.001],[1,0,0,0],0,0,0]];    
-PERS wobjdata currentWobj := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];   
+PERS tooldata currentTool;    
+PERS wobjdata currentWobj;   
 PERS speeddata currentSpeed;
 PERS zonedata currentZone;
+PERS loaddata currentLoad;
 
 !// Clock Synchronization
 PERS bool startLog:=TRUE;
@@ -21,7 +22,7 @@ PERS bool frameMutex:=FALSE;
 VAR socketdev clientSocket;
 VAR socketdev serverSocket;
 VAR num instructionCode;
-VAR num params{10};
+VAR num params{11};
 VAR num nParams;
 
 !PERS string ipController:= "192.168.125.1"; !robot default IP
@@ -50,9 +51,14 @@ VAR num ok;
 CONST num SERVER_BAD_MSG :=  0;
 CONST num SERVER_OK := 1;
 
+!// Declaration for force control applications
+PERS num forceReference;
+PERS num forceThreshold;
+PERS num forceChange;
+PERS num dampingTune;
+PERS num forceValue;
+PERS num zeroContactValue;
 
-
-	
 !////////////////
 !LOCAL METHODS
 !////////////////
@@ -138,7 +144,8 @@ PROC Initialize()
     currentTool := [TRUE,[[0,0,0],[1,0,0,0]],[0.001,[0,0,0.001],[1,0,0,0],0,0,0]];    
     currentWobj := [FALSE,TRUE,"",[[0,0,0],[1,0,0,0]],[[0,0,0],[1,0,0,0]]];
     currentSpeed := [100, 50, 0, 0];
-    currentZone := [FALSE, 0.3, 0.3,0.3,0.03,0.3,0.03]; !z0
+    currentZone := [FALSE, 0.3, 0.3,0.3,0.03,0.3,0.03]; !z0 
+    currentLoad := [64.3209,[-0.788059,-15.1678,240.398],[1,0,0,0],0,0,0];
 	
 	!Find the current external axis values so they don't move when we start
 	jointsTarget := CJointT();
@@ -192,11 +199,11 @@ PROC main()
                     ok := SERVER_BAD_MSG;
                 ENDIF
 
-            CASE 1: !Cartesian Move
-                IF nParams = 7 THEN
+            CASE 1: !Cartesian MoveL
+                IF nParams = 11 THEN
                     cartesianTarget :=[[params{1},params{2},params{3}],
                                        [params{4},params{5},params{6},params{7}],
-                                       [0,0,0,0],
+                                       [params{8},params{9},params{10},params{11}],
                                        externalAxis];
                     ok := SERVER_OK;
                     moveCompleted := FALSE;
@@ -326,10 +333,10 @@ PROC main()
                 ENDIF
 
             CASE 30: !Add Cartesian Coordinates to buffer
-                IF nParams = 7 THEN
+                IF nParams = 11 THEN
                     cartesianTarget :=[[params{1},params{2},params{3}],
                                         [params{4},params{5},params{6},params{7}],
-                                        [0,0,0,0],
+                                        [params{8},params{9},params{10},params{11}],
                                         externalAxis];
                     IF BUFFER_POS < MAX_BUFFER THEN
                         BUFFER_POS := BUFFER_POS + 1;
@@ -402,7 +409,136 @@ PROC main()
                 ELSE
                     ok:=SERVER_BAD_MSG;
                 ENDIF
+                
+            CASE 70: !Cartesian MoveL
+                IF nParams = 11 THEN
+                    cartesianTarget :=[[params{1},params{2},params{3}],
+                                       [params{4},params{5},params{6},params{7}],
+                                       [params{8},params{9},params{10},params{11}],
+                                       externalAxis];
+                    ok := SERVER_OK;
+                    moveCompleted := FALSE;
+                    MoveJ cartesianTarget, currentSpeed, currentZone, currentTool \WObj:=currentWobj ;
+                    moveCompleted := TRUE;
+                ELSE
+                    ok := SERVER_BAD_MSG;
+                ENDIF	
+
+            CASE 71: !Start spindle
+                IF nParams = 1 THEN
+                    nRevolution := params{1};
+                    FPAddOns_SpindleOn;
+                ELSE
+                    ok := SERVER_BAD_MSG;
+                ENDIF
+            
+            CASE 72: !Off spindle
+                IF nParams = 0 THEN
+                    FPAddOns_SpindleOff;
+                ELSE
+                    ok := SERVER_BAD_MSG;
+                ENDIF
 				
+            CASE 73: !Set load data
+                IF nParams = 11 THEN 
+                    currentLoad.mass := params{1};
+                    currentLoad.cog := [params{2}, params{3}, params{4}];
+                    currentLoad.aom := [params{5}, params{6}, params{7}, params{8}];
+                    currentLoad.ix := params{9};
+                    currentLoad.iy := params{10};
+                    currentLoad.iz := params{11};
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+                
+            CASE 74: !Force reference for FCPress1LStart
+                IF nParams = 1 THEN
+                    forceReference := params{1};
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+                
+            CASE 75: !Force threshold for FCPress1LStart
+                IF nParams = 1 THEN
+                    forceThreshold := params{1};
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+                
+            CASE 76: !Force change for FCPress1LStart
+                IF nParams = 1 THEN
+                    forceChange := params{1};
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+                
+            CASE 77: !Damping Tune for FCPress1LStart
+                IF nParams = 1 THEN
+                    dampingTune := params{1};
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+
+            CASE 78: !Force value for FCPressL
+                IF nParams = 1 THEN
+                    forceValue := params{1};
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+                
+            CASE 79: !Zero contact value for FCPressEnd
+                IF nParams = 1 THEN
+                    zeroContactValue := params{1};
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+
+            CASE 80: !FCPressStart1L
+                IF nParams = 11 THEN
+                    cartesianTarget :=[[params{1},params{2},params{3}],
+                                       [params{4},params{5},params{6},params{7}],
+                                       [params{8},params{9},params{10},params{11}],
+                                       externalAxis];
+                    ok := SERVER_OK;
+                    moveCompleted := FALSE;
+                    FCPress1LStart cartesianTarget, currentSpeed, \Fz:=ForceReference, forceThreshold, \ForceFrameRef:=FC_REFFRAME_TOOL,\ForceChange:=forceChange, \DampingTune:=dampingTune, currentZone, currentTool \WObj:=currentWobj ;
+                    moveCompleted := TRUE;
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+
+            CASE 81: !FCPressEnd
+                IF nParams = 11 THEN
+                    cartesianTarget :=[[params{1},params{2},params{3}],
+                                       [params{4},params{5},params{6},params{7}],
+                                       [params{8},params{9},params{10},params{11}],
+                                       externalAxis];
+                    ok := SERVER_OK;
+                    moveCompleted := FALSE;
+                    FCPressEnd cartesianTarget, currentSpeed, \ForceChange:=ForceChange, \ZeroContactValue:=zeroContactValue, currentTool \WObj:=currentWobj ;
+                    moveCompleted := TRUE;
+
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+
+            CASE 82: !Execute moves in cartesianBuffer in force control mode
+                IF nParams = 0 THEN
+                    FOR i FROM 1 TO (BUFFER_POS) DO 
+                        FCPressL bufferTargets{i}, bufferSpeeds{i}, forceValue, currentZone, currentTool \WObj:=currentWobj ;
+                    ENDFOR			
+                    ok := SERVER_OK;
+                ELSE
+                    ok:=SERVER_BAD_MSG;
+                ENDIF
+                
+            CASE 83: !FCCalib
+                IF nParams = 0 THEN
+                    FCCalib currentLoad;
+                ELSE
+                    ok :=SERVER_BAD_MSG;
+                ENDIF
+
             CASE 98: !returns current robot info: serial number, robotware version, and robot type
                 IF nParams = 0 THEN
                     addString := GetSysInfo(\SerialNo) + "*";
