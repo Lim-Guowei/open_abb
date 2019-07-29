@@ -14,6 +14,7 @@ PERS tooldata currentTool;
 PERS wobjdata currentWobj;
 VAR speeddata currentSpeed;
 VAR zonedata currentZone;
+PERS num FPAddOns_nMaxRev;
 
 !//Logger sampling rate
 !PERS num loggerWaitTime:= 0.01;  !Recommended for real controller
@@ -44,6 +45,7 @@ PROC main()
 	VAR jointtarget joints;
     VAR string sendString;
 	VAR bool connected;
+    VAR num actualSpindleSpeed;
 
 	VAR string date;
 	VAR string time;
@@ -90,6 +92,18 @@ PROC main()
 			SocketSend clientSocket \Str:=data;
 		ENDIF
 		WaitTime loggerWaitTime;
+        
+        !Actual spindle speed
+        actualSpindleSpeed := (aiSIF_SPI_ActSpeed*FPAddOns_nMaxRev)/10;
+        data := "# 2 ";
+		data := data + date + " " + time + " ";
+		data := data + NumToStr(ClkRead(timer),2) + " ";
+        data := data + NumToStr(actualSpindleSpeed, 2) + " "; !End of string
+		IF connected = TRUE THEN
+			SocketSend clientSocket \Str:=data;
+		ENDIF
+		WaitTime loggerWaitTime;
+
 	ENDWHILE
 	ERROR
 	IF ERRNO=ERR_SOCK_CLOSED THEN
