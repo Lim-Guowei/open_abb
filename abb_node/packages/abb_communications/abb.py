@@ -16,9 +16,12 @@ import inspect
 from threading import Thread
 from collections import deque
 import logging
+import tkinter as tk
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
+
+
     
 class Robot:
     def __init__(self, 
@@ -29,14 +32,11 @@ class Robot:
         self.delay   = .08
 
         self.connect_motion((ip, port_motion))
-        #log_thread = Thread(target = self.get_net, 
-        #                    args   = ((ip, port_logger))).start()
-        
         self.set_units('millimeters', 'degrees')
         self.set_tool()
         self.set_workobject()
         self.set_speed()
-        self.set_zone()
+        self.set_zone() 
 
     def connect_motion(self, remote):        
         log.info('Attempting to connect to robot motion server at %s', str(remote))
@@ -45,22 +45,6 @@ class Robot:
         self.sock.connect(remote)
         self.sock.settimeout(None)
         log.info('Connected to robot motion server at %s', str(remote))
-
-    def connect_logger(self, remote, maxlen=None):
-        self.pose   = deque(maxlen=maxlen)
-        self.joints = deque(maxlen=maxlen)
-        
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(remote)
-        s.setblocking(1)
-        try:
-            while True:
-                data = map(float, s.recv(4096).split())
-                if   int(data[1]) == 0: 
-                    self.pose.append([data[2:5], data[5:]])
-                #elif int(data[1]) == 1: self.joints.append([a[2:5], a[5:]])
-        finally:
-            s.shutdown(socket.SHUT_RDWR)
 
     def set_units(self, linear, angular):
         units_l = {'millimeters': 1.0,
@@ -71,12 +55,20 @@ class Robot:
         self.scale_linear = units_l[linear]
         self.scale_angle  = units_a[angular]
 
-    def set_cartesian(self, pose):
+    def set_cartesianL(self, pose):
         '''
         Executes a move immediately from the current pose,
         to 'pose', with units of millimeters.
         '''
-        msg  = "01 " + self.format_pose(pose)   
+        msg  = "01 " + self.format_pose(pose)
+        return self.send(msg)
+
+    def set_cartesianJ(self, pose):
+        '''
+        Executes a move immediately from the current pose,
+        to 'pose', with units of millimeters.
+        '''
+        msg  = "70 " + self.format_pose(pose)
         return self.send(msg)
 
     def set_joints(self, joints):
@@ -137,7 +129,7 @@ class Robot:
         Offsets are from tool0, which is defined at the intersection of the
         tool flange center axis and the flange face.
         '''
-        msg       = "06 " + self.format_pose(tool)    
+        msg       = "06 " + self.format_pose(tool)
         self.send(msg)
         self.tool = tool
 
@@ -220,12 +212,105 @@ class Robot:
         msg += format(zone[2], "+08.4f") + " #" 
         self.send(msg)
 
+    def set_load(self, loadData=[64.3209,[-0.788059,-15.1678,240.398],[1,0,0,0],0,0,0]):   # Added by Guowei
+        """
+        Set the load data: mass, [center of gravity], [w.r.t. tool coordinate frame], axes of moment ix , iy, iz
+        """
+        if len(loadData) != 6: return False
+        msg = "73 "
+        msg += format(loadData[0], "+08.4f") + " "
+        for i  in loadData[1]:
+            msg += format(i[0], "+08.3f") + " "
+        for i  in loadData[2]:
+            msg += format(i[0], "+08.0f") + " "
+        msg += format(loadData[3], "+08.3f") + " "
+        msg += format(loadData[4], "+08.3f") + " "
+        msg += format(loadData[5], "+08.3f") + " #"
+        return self.send(msg)
+
+    def set_forceReference(self, val):
+        """
+        Force reference for FCPress1LStart RAPID command. Default to z-axis direction in RAPID.
+        """
+        msg = "74 "
+        msg += format(val, "+08.1f") + " #"
+        return self.send(msg)
+
+    def set_forceThreshold(self, val):
+        """
+        Force threshold for FCPress1LStart RAPID command.
+        """
+        msg = "75 "
+        msg += format(val, "+08.1f") + " #"
+        return self.send(msg)
+
+    def set_forceChange(self, val):
+        """
+        Force change for FCPress1LStart RAPID command.
+        """
+        msg = "76 "
+        msg += format(val, "+08.1f") + " #"
+        return self.send(msg)
+
+    def set_dampingTune(self, val):
+        """
+        Damping tune for FCPress1LStart RAPID command.
+        """
+        msg = "77 "
+        msg += format(val, "+08.1f") + " #"
+        return self.send(msg)
+
+    def set_forceValue(self, val):
+        """
+        Force value for FCPressL RAPID command.
+        """
+        msg = "78 "
+        msg += format(val, "+08.1f") + " #"
+        return self.send(msg)
+
+    def set_zeroContactValue(self, val):
+        """
+        Zero contact value for FCPressEnd RAPID command.
+        """
+        msg = "79 "
+        msg += format(val, "+08.1f") + " #"
+        return self.send(msg)
+
+    def set_fcStart(self, pose):
+        """
+        Execute FCPress1LStart command. Reference Force is set in z-axis only in RAPID.
+        """
+        msg = "80 " + self.format_pose(pose)
+        return self.send(msg)
+        
+    def set_fcEnd(self, pose):
+        """
+        Execute FCPressEnd command.
+        """
+        msg = "81 " + self.format_pose(pose)
+        return self.send(msg)
+
+    def buffer_executeFC(self):
+        """
+        Execute linear move to every points saved in buffer in force control mode
+        """
+        msg = "82 #"
+        return self.send(msg)
+
+    def set_fcCalib(self):
+        """
+        Trigger FCCalib function in RAPID. Load data is pulled in RAPID.
+        """
+        msg = '83 #'
+        return self.send(msg)
+
     def buffer_add(self, pose):
         '''
         Appends single pose to the remote buffer
         Move will execute at current speed (which you can change between buffer_add calls)
+        Used subsequently for both buffer_execute and buffer_executeFC
         '''
-        msg = "30 " + self.format_pose(pose) 
+        msg = "30 " + self.format_pose(pose)
         self.send(msg)
 
     def buffer_set(self, pose_list):
@@ -267,6 +352,21 @@ class Robot:
         msg = "33 #"
         return self.send(msg)
 
+    def SpindleOn(self, rpm):   # Added by Guowei
+        """ 
+        Set rpm and power on spindle
+        """
+        self.rpm = rpm
+        msg = "71 " + str(round(self.rpm)) + " #"
+        return self.send(msg)
+
+    def SpindleOff(self):      # Added by Guowei
+        """ 
+        Power off spindle
+        """
+        msg = "72 #"
+        return self.send(msg)
+
     def set_external_axis(self, axis_unscaled=[-550,0,0,0,0,0]):
         if len(axis_values) != 6: return False
         msg = "34 "
@@ -306,7 +406,7 @@ class Robot:
         '''
         caller = inspect.stack()[1][3]
         log.debug('%-14s sending: %s', caller, message)
-        self.sock.send(message)
+        self.sock.send(message.encode("ascii"))  
         time.sleep(self.delay)
         if not wait_for_response: return
         data = self.sock.recv(4096)
@@ -316,11 +416,23 @@ class Robot:
     def format_pose(self, pose):
         pose = check_coordinates(pose)
         msg  = ''
-        for cartesian in pose[0]:
-            msg += format(cartesian * self.scale_linear,  "+08.1f") + " " 
-        for quaternion in pose[1]:
-            msg += format(quaternion, "+08.5f") + " " 
-        msg += "#" 
+        if (len(pose) == 3): 
+            for cartesian in pose[0]:
+                msg += format(cartesian * self.scale_linear,  "+0.3f") + " " 
+            for quaternion in pose[1]:
+                msg += format(quaternion, "+0.5f") + " " 
+            for configuration in pose[2]:   # Added by Guowei
+                msg += format(configuration, "+0.0f") + " "
+            # for externalaxes in pose[3]:    # Added by Guowei # Not possible to include externalaxes. Maximum allowable string length for RAPID is 80. To overcome, split array and store in two string variables.
+            #     msg += format(externalaxes, "+08.0E") + " "
+
+        elif (len(pose) == 2):
+            for cartesian in pose[0]:
+                msg += format(cartesian * self.scale_linear,  "+0.3f") + " " 
+            for quaternion in pose[1]:
+                msg += format(quaternion, "+0.5f") + " " 
+            
+        msg += "#"
         return msg       
         
     def close(self):
@@ -340,10 +452,72 @@ def check_coordinates(coordinates):
         (len(coordinates[0]) == 3) and 
         (len(coordinates[1]) == 4)): 
         return coordinates
+
+    elif ((len(coordinates) == 3) and         # Added by Guowei
+        (len(coordinates[0]) == 3) and 
+        (len(coordinates[1]) == 4) and 
+        (len(coordinates[2]) == 4)):
+        return coordinates
+
     elif (len(coordinates) == 7):
         return [coordinates[0:3], coordinates[3:7]]
-    log.warn('Recieved malformed coordinate: %s', str(coordinates))
-    raise NameError('Malformed coordinate!')
+
+    else:
+        log.warn('Recieved malformed coordinate: %s', str(coordinates))
+        raise NameError('Malformed coordinate!')
+
+class RobotLogger:
+    def __init__(self, ip = '192.168.125.1', 
+                 port_motion = 5000,
+                 port_logger = 5001):
+
+        self.ip = ip
+        self.port_logger = port_logger
+        self.remote = (self.ip, self.port_logger)
+
+        return
+
+    def connect_logger(self, maxlen=None):
+        
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(self.remote)
+        s.setblocking(1)
+        
+        collect_robotPosition =[]
+        collect_jointPosition =[]
+        collect_actualSpindleSpeedVal =[]
+
+        try:
+            while True:
+                data = list(map(str, s.recv(4096).decode("UTF-8").split()))
+                if int(data[1]) == 0: 
+                    self.transXVal = data[5]
+                    self.transYVal = data[6]
+                    self.transZVal = data[7]
+                    self.rotq1Val = data[8]
+                    self.rotq2Val = data[9]
+                    self.rotq3Val = data[10]
+                    self.rotq4Val = data[11]
+                    collect_robotPosition.append([self.transXVal, self.transYVal, self.transZVal, self.rotq1Val, self.rotq2Val, self.rotq3Val, self.rotq4Val])
+                    print(self.transXVal, self.transYVal, self.transZVal, self.rotq1Val, self.rotq2Val, self.rotq3Val, self.rotq4Val)
+
+                elif int(data[1]) == 1: 
+                    self.joint1Val = data[5]
+                    self.joint2Val = data[6]
+                    self.joint3Val = data[7]
+                    self.joint4Val = data[8]
+                    self.joint5Val = data[9]
+                    self.joint6Val = data[10]
+                    collect_jointPosition.append([self.joint1Val, self.joint2Val, self.joint3Val, self.joint4Val, self.joint5Val, self.joint6Val])
+                    print(self.joint1Val, self.joint2Val, self.joint3Val, self.joint4Val, self.joint5Val, self.joint6Val)
+
+                elif int(data[1]) == 2:
+                    self.actualSpindleSpeedVal = data[5]
+                    collect_actualSpindleSpeedVal.append([self.actualSpindleSpeedVal])
+                    print(self.actualSpindleSpeedVal)
+
+        finally:
+            s.shutdown(socket.SHUT_RDWR)
 
 if __name__ == '__main__':
     formatter = logging.Formatter("[%(asctime)s] %(levelname)-7s (%(filename)s:%(lineno)3s) %(message)s", "%Y-%m-%d %H:%M:%S")
@@ -353,4 +527,4 @@ if __name__ == '__main__':
     log = logging.getLogger('abb')
     log.setLevel(logging.DEBUG)
     log.addHandler(handler_stream)
-    
+
